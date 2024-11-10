@@ -1,7 +1,11 @@
 from typing import Optional
+from pathlib import Path
+
+import asyncio
 import aiosqlite
 import json
 
+DB_PATH = Path(__file__).parent / "../db/inst_followers.db"  # подстройте путь
 
 async def create_database():
     async with aiosqlite.connect("inst_followers.db") as db:
@@ -10,13 +14,12 @@ async def create_database():
                 tg_id INTEGER PRIMARY KEY,
                 tg_username TEXT NOT NULL,
                 inst_username TEXT NOT NULL,
-                inst_password TEXT NOT NULL,
                 followers TEXT  -- Храним подписчиков как JSON-строку
             )
         """)
         # Сохраняем изменения
         await db.commit()
-        print("Таблица users создана!")
+        print("Таблица создана!")
 
 
 async def get_all_users_tg_usenames():
@@ -40,19 +43,30 @@ async def get_followers(tg_id):
                 print("Пользователь не найден")
 
 
-async def add_user(tg_id, tg_username, inst_username, inst_password, followers_list):
-    # Преобразуем список подписчиков в строку JSON
-    followers_json = json.dumps(followers_list)
+async def add_user(tg_id, tg_username, inst_username):
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Проверяем, существует ли пользователь с данным tg_id
+        async with db.execute("SELECT 1 FROM inst_followers WHERE tg_id = ?", (tg_id,)) as cursor:
+            user_exists = await cursor.fetchone()
 
-    async with aiosqlite.connect("inst_followers.db") as db:
-        # Вставляем нового пользователя в таблицу
-        await db.execute("""
-            INSERT INTO inst_followers (tg_id, tg_username, inst_username, inst_password, followers)
-            VALUES (?, ?, ?, ?, ?)
-        """, (tg_id, tg_username, inst_username, inst_password, followers_json))
+        if user_exists:
+            # Обновляем inst_username и сбрасываем поле followers, если пользователь существует
+            await db.execute("""
+                UPDATE inst_followers
+                SET inst_username = ?, followers = NULL
+                WHERE tg_id = ?
+            """, (inst_username, tg_id))
+            print(f"Обновлены данные для пользователя {tg_username}")
+        else:
+            # Вставляем нового пользователя, если он не существует
+            await db.execute("""
+                INSERT INTO inst_followers (tg_id, tg_username, inst_username, followers)
+                VALUES (?, ?, ?, NULL)
+            """, (tg_id, tg_username, inst_username))
+            print(f"Пользователь {tg_username} добавлен в базу данных!")
+
         # Сохраняем изменения
         await db.commit()
-        print(f"Пользователь {tg_username} добавлен в базу данных!")
 
 
 async def update_followers(tg_id, followers):
@@ -87,3 +101,6 @@ async def update_user_info(tg_id, new_inst_username: Optional[str]=None, new_ins
             (*value, tg_id)
         )
         await db.commit()
+
+# asyncio.run(create_database())
+# asyncio.run(add_user(11, 11, 'kek'))
